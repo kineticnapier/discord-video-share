@@ -9,10 +9,18 @@ const EXPIRE_MS = 3 * 24 * 60 * 60 * 1000;
 const CHUNK_SIZE = 16 * 1024 * 1024;
 const CONCURRENCY = 6;
 const VIDEO_PREFIX = "videos/";
+const UPLOAD_SESSION_PREFIX = "multipart-sessions/";
 
 type UploadedPartJson = {
   partNumber: number;
   etag: string;
+};
+
+type MultipartSession = {
+  id: string;
+  key: string;
+  uploadId: string;
+  expiresAt: number;
 };
 
 function text(body: string, status = 200): Response {
@@ -65,6 +73,10 @@ function getVideoKey(id: string): string {
   return `${VIDEO_PREFIX}${id}`;
 }
 
+function getUploadSessionKey(id: string): string {
+  return `${UPLOAD_SESSION_PREFIX}${id}.json`;
+}
+
 function getPublicVideoUrls(request: Request, id: string): { viewUrl: string; fileUrl: string } {
   const origin = getOrigin(request);
   const encodedId = encodeURIComponent(id);
@@ -109,6 +121,16 @@ async function handleMultipartCreate(request: Request, env: Env): Promise<Respon
     httpMetadata: {
       contentType,
     },
+  });
+
+  const session: MultipartSession = {
+    id,
+    key,
+    uploadId: upload.uploadId,
+    expiresAt,
+  };
+  await env.BUCKET.put(getUploadSessionKey(id), JSON.stringify(session), {
+    httpMetadata: { contentType: "application/json; charset=utf-8" },
   });
 
   return json({
@@ -193,6 +215,7 @@ async function handleMultipartFinish(request: Request, env: Env): Promise<Respon
   const upload = env.BUCKET.resumeMultipartUpload(key, body.uploadId);
 
   await upload.complete(parts);
+  await env.BUCKET.delete(getUploadSessionKey(body.id));
 
   const { viewUrl, fileUrl } = getPublicVideoUrls(request, body.id);
 
@@ -283,6 +306,36 @@ async function cleanupExpired(env: Env): Promise<void> {
 
     cursor = listed.truncated ? listed.cursor : undefined;
   } while (cursor);
+
+  let sessionCursor: string | undefined = undefined;
+  do {
+    const listed = await env.BUCKET.list({
+      prefix: UPLOAD_SESSION_PREFIX,
+      cursor: sessionCursor,
+      limit: 1000,
+    });
+
+    for (const obj of listed.objects) {
+      const marker = await env.BUCKET.get(obj.key);
+      if (!marker) continue;
+
+      const session = await marker.json<MultipartSession>();
+      if (!session || !Number.isFinite(session.expiresAt) || session.expiresAt > now) {
+        continue;
+      }
+
+      try {
+        const upload = env.BUCKET.resumeMultipartUpload(session.key, session.uploadId);
+        await upload.abort();
+      } catch {
+        // already completed/aborted, ignore
+      }
+
+      await env.BUCKET.delete(obj.key);
+    }
+
+    sessionCursor = listed.truncated ? listed.cursor : undefined;
+  } while (sessionCursor);
 }
 
 export default {
