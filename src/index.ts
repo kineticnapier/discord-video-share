@@ -301,7 +301,7 @@ export default {
   },
 
   async scheduled(
-    _event: ScheduledEvent,
+    _controller: ScheduledController,
     env: Env,
     _ctx: ExecutionContext,
   ): Promise<void> {
