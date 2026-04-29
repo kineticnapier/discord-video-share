@@ -6,8 +6,8 @@ export interface Env {
 }
 
 const EXPIRE_MS = 3 * 24 * 60 * 60 * 1000;
-const CHUNK_SIZE = 40 * 1024 * 1024;
-const CONCURRENCY = 4;
+const CHUNK_SIZE = 16 * 1024 * 1024;
+const CONCURRENCY = 6;
 const VIDEO_PREFIX = "videos/";
 
 type UploadedPartJson = {
@@ -222,13 +222,15 @@ async function handleView(request: Request, env: Env, id: string): Promise<Respo
   return html(getViewPageHtml(fileUrl, contentType));
 }
 
-async function handleFile(env: Env, id: string): Promise<Response> {
+async function handleFile(request: Request, env: Env, id: string): Promise<Response> {
   if (!isValidId(id)) {
     return text("Invalid id", 400);
   }
 
   const key = getVideoKey(id);
-  const obj = await env.BUCKET.get(key);
+  const rangeHeader = request.headers.get("range");
+  const getOptions = rangeHeader ? { range: request.headers } : undefined;
+  const obj = await env.BUCKET.get(key, getOptions);
 
   if (!obj) {
     return text("Not found", 404);
@@ -239,6 +241,22 @@ async function handleFile(env: Env, id: string): Promise<Response> {
   headers.set("Content-Type", obj.httpMetadata?.contentType ?? getContentTypeFromId(id));
   headers.set("Cache-Control", "public, max-age=3600");
 
+  if (
+    rangeHeader &&
+    obj.range &&
+    obj.size != null &&
+    "offset" in obj.range &&
+    "length" in obj.range
+  ) {
+    const start = obj.range.offset ?? 0;
+    const length = obj.range.length ?? 0;
+    const end = start + length - 1;
+    headers.set("Accept-Ranges", "bytes");
+    headers.set("Content-Range", `bytes ${start}-${end}/${obj.size}`);
+    return new Response(obj.body, { headers, status: 206 });
+  }
+
+  headers.set("Accept-Ranges", "bytes");
   return new Response(obj.body, { headers });
 }
 
@@ -294,7 +312,7 @@ export default {
 
     if (request.method === "GET" && url.pathname.startsWith("/file/")) {
       const id = getPathId(url.pathname, "/file/");
-      return handleFile(env, id);
+      return handleFile(request, env, id);
     }
 
     return text("Not found", 404);

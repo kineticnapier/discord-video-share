@@ -2,41 +2,62 @@ export const uploadPageHtml = `<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <title>Video Upload</title>
+  <title>Video Upload Studio</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
+    :root {
+      color-scheme: dark;
+    }
     body {
-      font-family: system-ui, sans-serif;
-      max-width: 720px;
-      margin: 40px auto;
-      padding: 0 16px;
+      font-family: Inter, system-ui, sans-serif;
+      max-width: 840px;
+      margin: 32px auto;
+      padding: 0 16px 48px;
+      background: radial-gradient(circle at top, #1f2a44 0%, #0b1020 52%, #060912 100%);
+      color: #e8ebf8;
     }
     input, button {
       font-size: 16px;
-      padding: 8px;
-      margin: 8px 0;
+      padding: 12px;
+      margin: 10px 0;
       width: 100%;
       box-sizing: border-box;
+      border-radius: 12px;
+      border: 1px solid #3a4464;
     }
+    input { background: #0f1730; color: #eff3ff; }
+    button { background: linear-gradient(135deg, #6e8bff, #8a5dff); color: white; border: none; font-weight: 700; cursor: pointer; }
     progress {
       width: 100%;
       height: 24px;
+      accent-color: #7d8fff;
     }
     pre {
-      background: #f3f3f3;
+      background: #101a35;
       padding: 12px;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
+      border-radius: 12px;
     }
     .hidden {
       display: none;
     }
+    .panel {
+      background: rgba(10, 15, 30, 0.82);
+      border: 1px solid #2f3d66;
+      border-radius: 18px;
+      padding: 20px;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 18px 46px rgba(0,0,0,0.35);
+    }
+    .muted { color: #b2bddf; }
   </style>
 </head>
 <body>
-  <h1>Video Upload</h1>
+  <h1>Video Upload Studio</h1>
+  <p class="muted">高速な分割アップロードでDiscord共有を快適に。</p>
 
-  <form id="form">
+  <form id="form" class="panel">
     <label>
       Upload password
       <input id="password" type="password" required>
@@ -61,8 +82,8 @@ export const uploadPageHtml = `<!doctype html>
   </div>
 
   <script>
-  const CHUNK_SIZE = 40 * 1024 * 1024;
-  const CONCURRENCY = 4;
+  const CHUNK_SIZE = 16 * 1024 * 1024;
+  const CONCURRENCY = 6;
 
   const form = document.getElementById("form");
   const statusEl = document.getElementById("status");
