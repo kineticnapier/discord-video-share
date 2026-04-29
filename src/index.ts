@@ -6,6 +6,7 @@ export interface Env {
 const EXPIRE_MS = 3 * 24 * 60 * 60 * 1000;
 const CHUNK_SIZE = 40 * 1024 * 1024;
 const CONCURRENCY = 4;
+const VIDEO_PREFIX = "videos/";
 
 type UploadedPartJson = {
   partNumber: number;
@@ -56,6 +57,24 @@ function isValidId(id: string): boolean {
 
 function isAuthedPassword(password: unknown, env: Env): boolean {
   return typeof password === "string" && password === env.UPLOAD_PASSWORD;
+}
+
+function getVideoKey(id: string): string {
+  return `${VIDEO_PREFIX}${id}`;
+}
+
+function getPublicVideoUrls(request: Request, id: string): { viewUrl: string; fileUrl: string } {
+  const origin = getOrigin(request);
+  const encodedId = encodeURIComponent(id);
+
+  return {
+    viewUrl: `${origin}/v/${encodedId}`,
+    fileUrl: `${origin}/file/${encodedId}`,
+  };
+}
+
+function getPathId(pathname: string, prefix: string): string {
+  return decodeURIComponent(pathname.slice(prefix.length));
 }
 
 function getUploadPage(): Response {
@@ -291,7 +310,7 @@ async function handleMultipartCreate(request: Request, env: Env): Promise<Respon
   const expiresAt = Date.now() + EXPIRE_MS;
   const ext = getExtFromType(contentType);
   const id = `${expiresAt}-${crypto.randomUUID()}.${ext}`;
-  const key = `videos/${id}`;
+  const key = getVideoKey(id);
 
   const upload = await env.BUCKET.createMultipartUpload(key, {
     httpMetadata: {
@@ -338,7 +357,7 @@ async function handleMultipartPart(request: Request, env: Env): Promise<Response
     return text("No body", 400);
   }
 
-  const key = `videos/${id}`;
+  const key = getVideoKey(id);
   const upload = env.BUCKET.resumeMultipartUpload(key, uploadId);
 
   const uploadedPart = await upload.uploadPart(partNumber, request.body);
@@ -377,18 +396,18 @@ async function handleMultipartFinish(request: Request, env: Env): Promise<Respon
     }))
     .sort((a, b) => a.partNumber - b.partNumber);
 
-  const key = `videos/${body.id}`;
+  const key = getVideoKey(body.id);
   const upload = env.BUCKET.resumeMultipartUpload(key, body.uploadId);
 
   await upload.complete(parts);
 
-  const origin = getOrigin(request);
+  const { viewUrl, fileUrl } = getPublicVideoUrls(request, body.id);
 
   return json({
     ok: true,
     id: body.id,
-    viewUrl: `${origin}/v/${encodeURIComponent(body.id)}`,
-    fileUrl: `${origin}/file/${encodeURIComponent(body.id)}`,
+    viewUrl,
+    fileUrl,
   });
 }
 
@@ -397,15 +416,14 @@ async function handleView(request: Request, env: Env, id: string): Promise<Respo
     return text("Invalid id", 400);
   }
 
-  const key = `videos/${id}`;
+  const key = getVideoKey(id);
   const obj = await env.BUCKET.head(key);
 
   if (!obj) {
     return text("Not found", 404);
   }
 
-  const origin = getOrigin(request);
-  const fileUrl = `${origin}/file/${encodeURIComponent(id)}`;
+  const { fileUrl } = getPublicVideoUrls(request, id);
   const contentType = obj.httpMetadata?.contentType ?? getContentTypeFromId(id);
 
   return html(`<!doctype html>
@@ -437,7 +455,7 @@ async function handleFile(env: Env, id: string): Promise<Response> {
     return text("Invalid id", 400);
   }
 
-  const key = `videos/${id}`;
+  const key = getVideoKey(id);
   const obj = await env.BUCKET.get(key);
 
   if (!obj) {
@@ -458,13 +476,13 @@ async function cleanupExpired(env: Env): Promise<void> {
 
   do {
     const listed = await env.BUCKET.list({
-      prefix: "videos/",
+      prefix: VIDEO_PREFIX,
       cursor,
       limit: 1000,
     });
 
     for (const obj of listed.objects) {
-      const filename = obj.key.slice("videos/".length);
+      const filename = obj.key.slice(VIDEO_PREFIX.length);
       const expiresAtText = filename.split("-")[0];
       const expiresAt = Number(expiresAtText);
 
@@ -498,12 +516,12 @@ export default {
     }
 
     if (request.method === "GET" && url.pathname.startsWith("/v/")) {
-      const id = decodeURIComponent(url.pathname.slice("/v/".length));
+      const id = getPathId(url.pathname, "/v/");
       return handleView(request, env, id);
     }
 
     if (request.method === "GET" && url.pathname.startsWith("/file/")) {
-      const id = decodeURIComponent(url.pathname.slice("/file/".length));
+      const id = getPathId(url.pathname, "/file/");
       return handleFile(env, id);
     }
 
